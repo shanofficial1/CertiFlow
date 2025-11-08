@@ -469,7 +469,6 @@ export default function CertificateBatchGenerator() {
             <div className="h-14 w-48 rounded-lg">
               <img src={logo} alt="CertifyLab Logo" className="h-full w-full object-contain " />
             </div>
-            <span className="text-xl font-semibold tracking-tight text-white">CertifyLab</span>
           </div>
         </div>
       </header>
