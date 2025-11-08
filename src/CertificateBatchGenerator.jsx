@@ -450,7 +450,8 @@ export default function CertificateBatchGenerator() {
                 <Textarea
                   value={description}
                   onChange={(e)=>setDescription(e.target.value)}
-                  placeholder={`e.g. This certificate is proudly awarded to {name} of Team {team} in recognition of outstanding collaboration, innovation, and creativity during the NASA Space Apps Challenge – Kannur 2025, held on October 4–5. Your impactful contribution and remarkable problem-solving skills played a key role in your team being honored as a Local Winner, demonstrating commendable dedication, ingenuity, and teamwork throughout the event.`}
+                  placeholder={`e.g. This certificate is proudly awarded to {name} of Team {team} for their valuable contributions, dedication, and outstanding performance.
+Congratulations on this well-deserved recognition!`}
                   className="min-h-[160px]"
                 />
               </div>
@@ -463,8 +464,8 @@ export default function CertificateBatchGenerator() {
               </div>
 
               <div className="text-sm text-slate-500 pt-4 border-t">
-                <p className="mb-2 font-medium">Notes</p>
-                <ul className="list-disc pl-5 space-y-1">
+                <p className="mb-2 font-medium text-red-600">Notes</p>
+                <ul className="list-disc pl-5 space-y-1 text-red-600">
                   <li>For best quality, export your Canva template as a high-resolution PNG (300 DPI).</li>
                   <li>If you upload a PDF, only the first page is used as background.</li>
                   <li>Click the template to set paragraph Y quickly.</li>
