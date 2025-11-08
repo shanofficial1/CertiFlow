@@ -310,7 +310,7 @@ export default function CertificateBatchGenerator() {
         <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="h-8 w-8 rounded-lg bg-slate-900"></div>
-            <span className="text-xl font-semibold tracking-tight">CertiFlow</span>
+            <span className="text-xl font-semibold tracking-tight">CertifyLab</span>
           </div>
         </div>
       </header>
