@@ -446,6 +446,7 @@ export default function CertificateBatchGenerator() {
                 <Textarea
                   value={description}
                   onChange={(e)=>setDescription(e.target.value)}
+                  placeholder={`e.g. This certificate is proudly awarded to {name} of Team {team} in recognition of outstanding collaboration, innovation, and creativity during the NASA Space Apps Challenge – Kannur 2025, held on October 4–5. Your impactful contribution and remarkable problem-solving skills played a key role in your team being honored as a Local Winner, demonstrating commendable dedication, ingenuity, and teamwork throughout the event.`}
                   className="min-h-[160px]"
                 />
               </div>
