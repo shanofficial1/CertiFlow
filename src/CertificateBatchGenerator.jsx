@@ -69,7 +69,7 @@ async function pdfFirstPageToDataUrl(pdfjs, dataUrl) {
   return canvas.toDataURL("image/png");
 }
 
-// --------- Word wrap + (optional) justification for placeholders ----------
+// --------- Word wrap + (optional) justification for PDF placeholders ----------
 function tokenizeWithPlaceholders(text, nameValue, teamValue, fontRegular, fontBold, size, boldPlaceholders) {
   const rawTokens = text.split(/(\{name\}|\{team\})/g);
   const tokens = [];
@@ -147,6 +147,88 @@ function drawLines(page, lines, opts) {
   }
 }
 
+// ============ HTML CANVAS PREVIEW helpers ============
+function canvasTokens(ctx, text, nameValue, teamValue, boldPlaceholders) {
+  const rawTokens = text.split(/(\{name\}|\{team\})/g);
+  const tokens = [];
+  for (const t of rawTokens) {
+    if (!t) continue;
+    if (t === "{name}" || t === "{team}") {
+      const content = t === "{name}" ? nameValue : teamValue;
+      // Placeholder token (bold if enabled)
+      tokens.push({ text: content, isSpace: false, isBold: !!boldPlaceholders });
+    } else {
+      const parts = t.split(/(\s+)/);
+      for (const p of parts) {
+        if (p === "") continue;
+        const isSpace = /^\s+$/.test(p);
+        tokens.push({ text: p, isSpace, isBold: false });
+      }
+    }
+  }
+  // width will be computed later after setting proper font
+  return tokens;
+}
+
+function measureAndLayoutCanvas(ctx, baseFont, boldFont, tokens, maxWidth) {
+  // measure with appropriate font
+  for (const tok of tokens) {
+    ctx.font = tok.isBold ? boldFont : baseFont;
+    tok.width = ctx.measureText(tok.text).width;
+  }
+  // lay out
+  const lines = [];
+  let line = [];
+  let w = 0;
+  for (const tok of tokens) {
+    if (w + tok.width > maxWidth && line.length > 0 && !tok.isSpace) {
+      if (line.length && line[line.length - 1].isSpace) {
+        w -= line[line.length - 1].width;
+        line.pop();
+      }
+      lines.push({ items: line, width: w });
+      line = [];
+      w = 0;
+    }
+    line.push(tok);
+    w += tok.width;
+  }
+  if (line.length) {
+    if (line[line.length - 1].isSpace) {
+      w -= line[line.length - 1].width;
+      line.pop();
+    }
+    lines.push({ items: line, width: w });
+  }
+  return lines;
+}
+
+function drawCanvasParagraph(ctx, lines, opts) {
+  const { x, y, lineHeightPx, maxWidth, color, baseFont, boldFont, justify } = opts;
+  ctx.fillStyle = color;
+  let cursorY = y;
+  for (let li = 0; li < lines.length; li++) {
+    const { items, width } = lines[li];
+    const isLast = li === lines.length - 1;
+
+    // compute justification
+    let extraPerSpace = 0;
+    if (justify && !isLast && width < maxWidth) {
+      const spaces = items.filter(t => t.isSpace);
+      const room = maxWidth - width;
+      if (spaces.length > 0) extraPerSpace = room / spaces.length;
+    }
+
+    let cursorX = x;
+    for (const tok of items) {
+      ctx.font = tok.isBold ? boldFont : baseFont;
+      ctx.fillText(tok.text, cursorX, cursorY);
+      cursorX += tok.width + (tok.isSpace ? extraPerSpace : 0);
+    }
+    cursorY += lineHeightPx; // canvas y increases downwards
+  }
+}
+
 // ----------------- component -----------------
 export default function CertificateBatchGenerator() {
   const pdfjs = usePdfJs();
@@ -159,9 +241,7 @@ export default function CertificateBatchGenerator() {
   const [teamsText, setTeamsText] = useState("");
 
   // Paragraph (contains {name} + {team})
-  const [description, setDescription] = useState(
-    ""
-  );
+  const [description, setDescription] = useState("");
 
   // Paragraph rendering controls
   const [descY, setDescY] = useState(0);                 // baseline (px from bottom)
@@ -174,6 +254,9 @@ export default function CertificateBatchGenerator() {
 
   const [customFontFile, setCustomFontFile] = useState(null);
   const imgRef = useRef(null);
+
+  // NEW: preview canvas
+  const previewCanvasRef = useRef(null);
 
   // Upload template
   const onTemplateChange = async (file) => {
@@ -273,7 +356,7 @@ export default function CertificateBatchGenerator() {
       const lineHeight = descFontSize * 1.35;
 
       const tokens = tokenizeWithPlaceholders(
-        description,
+        description || "",
         rawName,
         team,
         descFontReg,
@@ -303,6 +386,79 @@ export default function CertificateBatchGenerator() {
     saveAs(blob, "certificates.zip");
   };
 
+  // ----------------- LIVE PREVIEW (canvas overlay) -----------------
+  useEffect(() => {
+    if (!templateDataUrl || !templateNatural.w || !templateNatural.h) return;
+    if (!imgRef.current || !previewCanvasRef.current) return;
+
+    const imgEl = imgRef.current;
+    const canvas = previewCanvasRef.current;
+    const rect = imgEl.getBoundingClientRect();
+
+    // fit canvas to displayed image size
+    canvas.width = Math.max(1, Math.floor(rect.width));
+    canvas.height = Math.max(1, Math.floor(rect.height));
+
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // preview picks first name/team, or placeholders if empty
+    const previewName = names[0] || "{name}";
+    const previewTeam = teams[0] || "{team}";
+
+    // scale from PDF-space to screen-space
+    const scale = rect.width / templateNatural.w;
+    const leftX = paddingPx * scale;
+    const maxWidth = Math.max(10, (templateNatural.w - 2 * paddingPx) * scale);
+
+    // y baseline in screen coords (canvas y grows down; convert from bottom-left PDF coords)
+    const screenY = (templateNatural.h - descY) * scale;
+
+    // font css families for canvas
+    const fam = (descFontFamily === "Times" ? "Times New Roman, Times, serif"
+              : descFontFamily === "Courier" ? "Courier New, Courier, monospace"
+              : "Helvetica, Arial, sans-serif"); // "Custom" preview will fall back here
+    const baseFont = `${descFontSize * scale}px ${fam}`;
+    const boldFont = `bold ${descFontSize * scale}px ${fam}`;
+
+    // tokenize/measure/layout with canvas metrics
+    const tokens = canvasTokens(ctx, description || "", previewName, previewTeam, boldPlaceholders);
+    const lines = measureAndLayoutCanvas(ctx, baseFont, boldFont, tokens, maxWidth);
+
+    // color
+    ctx.fillStyle = descFontColor;
+    ctx.textBaseline = "alphabetic"; // match PDF baseline
+    // line height in screen px
+    const lineHeightPx = descFontSize * 1.35 * scale;
+
+    // draw (convert baseline to canvas top-origin)
+    const firstBaselineY = screenY; // already baseline in screen coords
+    drawCanvasParagraph(ctx, lines, {
+      x: leftX,
+      y: firstBaselineY,
+      lineHeightPx,
+      maxWidth,
+      color: descFontColor,
+      baseFont,
+      boldFont,
+      justify,
+    });
+  }, [
+    templateDataUrl,
+    templateNatural.w,
+    templateNatural.h,
+    description,
+    descFontSize,
+    descFontColor,
+    descFontFamily,
+    paddingPx,
+    descY,
+    namesText,
+    teamsText,
+    boldPlaceholders,
+    justify,
+  ]);
+
   // ----------------- UI -----------------
   return (
     <>
@@ -312,9 +468,8 @@ export default function CertificateBatchGenerator() {
           <div className="flex items-center gap-2">
             <div className="h-14 w-48 rounded-lg">
               <img src={logo} alt="CertifyLab Logo" className="h-full w-full object-contain " />
-
             </div>
-            <span className="text-xl font-semibold tracking-tight">CertifyLab</span>
+            <span className="text-xl font-semibold tracking-tight text-white">CertifyLab</span>
           </div>
         </div>
       </header>
@@ -385,7 +540,7 @@ export default function CertificateBatchGenerator() {
                 </div>
               </div>
 
-              {/* Click template to set paragraph Y */}
+              {/* Preview with live text overlay */}
               <div className="rounded-xl overflow-hidden border bg-white">
                 {templateDataUrl ? (
                   <div className="relative">
@@ -396,17 +551,11 @@ export default function CertificateBatchGenerator() {
                       alt="template preview"
                       className="w-full h-auto cursor-crosshair select-none"
                     />
-                    {templateNatural.h > 0 && (
-                      <div
-                        className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none"
-                        style={{
-                          left: "50%",
-                          top: `${(1 - descY / templateNatural.h) * 100}%`,
-                        }}
-                      >
-                        <div className="w-4 h-4 bg-black/70 rounded-full border border-white" />
-                      </div>
-                    )}
+                    {/* LIVE canvas overlay */}
+                    <canvas
+                      ref={previewCanvasRef}
+                      className="absolute inset-0 pointer-events-none"
+                    />
                   </div>
                 ) : (
                   <div className="p-10 text-center text-slate-500">
@@ -428,7 +577,7 @@ export default function CertificateBatchGenerator() {
                 <div>
                   <Label>Names (one per line)</Label>
                   <Textarea
-                    placeholder={`e.g.\nAkash Gopalan\nShan`}
+                    placeholder={`e.g.\nArjun Nair\nSneha S Kumar\nRahul Menon\nDiya Jose\nNaveen Raj`}
                     value={namesText}
                     onChange={(e)=>setNamesText(e.target.value)}
                     className="min-h-[140px]"
@@ -437,7 +586,7 @@ export default function CertificateBatchGenerator() {
                 <div>
                   <Label>Teams (one per line, index must match Names)</Label>
                   <Textarea
-                    placeholder={`e.g.\nEXO HACKERS\nAstusu`}
+                    placeholder={`e.g.\nAlpha Tech\nQuantum Sparks\nCode Titans\nNebula Crew\nPixel Forge`}
                     value={teamsText}
                     onChange={(e)=>setTeamsText(e.target.value)}
                     className="min-h-[140px]"
@@ -450,8 +599,7 @@ export default function CertificateBatchGenerator() {
                 <Textarea
                   value={description}
                   onChange={(e)=>setDescription(e.target.value)}
-                  placeholder={`e.g. This certificate is proudly awarded to {name} of Team {team} for their valuable contributions, dedication, and outstanding performance.
-Congratulations on this well-deserved recognition!`}
+                  placeholder={`e.g. Proudly presented to {name} from Team {team} in recognition of remarkable contribution and dedication throughout the event.`}
                   className="min-h-[160px]"
                 />
               </div>
@@ -470,6 +618,7 @@ Congratulations on this well-deserved recognition!`}
                   <li>If you upload a PDF, only the first page is used as background.</li>
                   <li>Click the template to set paragraph Y quickly.</li>
                   <li>Justify spreads spaces to align edges (last line not justified).</li>
+                  <li>Preview uses browser fonts; custom uploaded font preview may look slightly different than final PDF.</li>
                   <li>Everything runs locally in your browser.</li>
                 </ul>
               </div>
