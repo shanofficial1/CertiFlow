@@ -366,7 +366,7 @@ export default function CertificateBatchGenerator() {
 
                 <div className="md:col-span-2">
                   <Label>Equal Left/Right Padding (px)</Label>
-                  <Slider value={[paddingPx]} onValueChange={(v)=>setPaddingPx(v[0])} min={0} max={300} step={1} />
+                  <Slider value={[paddingPx]} onValueChange={(v)=>setPaddingPx(v[0])} min={0} max={500} step={1} />
                   <div className="text-sm text-slate-500 mt-1">{paddingPx}px</div>
                 </div>
 
